@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.test.example
+.pytest_cache/
+.ruff_cache/
+.venv/
+__pycache__/
+*.py[cod]
+coverage.xml
+htmlcov/

@@ -1,88 +1,100 @@
-#!/bin/bash
-# migration runner with advisory lock support
+#!/usr/bin/env bash
 
 set -euo pipefail
 
-ENV=${ENV:-dev}
-TO_VERSION=${TO_VERSION:-}
-LOCK_TIMEOUT=${LOCK_TIMEOUT:-0}
-DRY_RUN=${DRY_RUN:-false}
+target_environment=${TARGET_ENVIRONMENT:-dev}
+to_version=${TO_VERSION:-}
+lock_timeout=${LOCK_TIMEOUT:-30}
+dry_run=${DRY_RUN:-false}
+script_directory=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repository_root=$(cd -- "$script_directory/../.." && pwd)
 
-echo "[migrate.sh] Starting migration for env=$ENV to_version=$TO_VERSION lock_timeout=$LOCK_TIMEOUT"
+case "$target_environment" in
+  dev)
+    database_url=${DEV_DATABASE_URL:-}
+    ;;
+  test)
+    database_url=${TEST_DATABASE_URL:-}
+    ;;
+  staging)
+    database_url=${STAGING_DATABASE_URL:-}
+    ;;
+  prod)
+    database_url=${PROD_DATABASE_URL:-}
+    ;;
+  *)
+    echo "[ERROR] unsupported TARGET_ENVIRONMENT=$target_environment" >&2
+    exit 2
+    ;;
+esac
 
-# Get database URL
-if [ "$ENV" = "prod" ]; then
-  DB_URL="${PROD_DATABASE_URL:-}"
-elif [ "$ENV" = "staging" ]; then
-  DB_URL="${STAGING_DATABASE_URL:-}"
-else
-  DB_URL="${DEV_DATABASE_URL:-}"
+if [[ -n "$to_version" && ! "$to_version" =~ ^[0-9]{1,2}$ ]]; then
+  echo "[ERROR] TO_VERSION must contain one or two digits" >&2
+  exit 2
 fi
 
-if [ -z "$DB_URL" ]; then
-  echo "[ERROR] Database URL not set for env=$ENV"
+if [[ ! "$lock_timeout" =~ ^[0-9]+$ ]]; then
+  echo "[ERROR] LOCK_TIMEOUT must be a non-negative integer" >&2
+  exit 2
+fi
+
+mapfile -t schema_files < <(
+  find "$repository_root/schema" -maxdepth 1 -type f \
+    -name '[0-9][0-9]_*.sql' -print | sort
+)
+
+selected_files=()
+for schema_file in "${schema_files[@]}"; do
+  filename=$(basename -- "$schema_file")
+  file_version=${filename%%_*}
+  if [[ -n "$to_version" ]] && \
+    ((10#$file_version > 10#$to_version)); then
+    continue
+  fi
+  selected_files+=("$schema_file")
+done
+
+if ((${#selected_files[@]} == 0)); then
+  echo "[ERROR] no schema files selected" >&2
   exit 1
 fi
 
-# Function: acquire advisory lock
-acquire_lock() {
-  local lock_id=1
-  local timeout=$1
-  
-  if [ "$timeout" -eq 0 ]; then
-    echo "[migrate.sh] Skipping advisory lock (timeout=0)"
-    return 0
-  fi
-  
-  echo "[migrate.sh] Acquiring advisory lock (timeout=${timeout}s)..."
-  psql "$DB_URL" -c "SET statement_timeout TO ${timeout}000; SELECT pg_advisory_lock($lock_id);"
-  echo "[migrate.sh] Lock acquired."
-}
+echo "[migrate] environment=$target_environment files=${#selected_files[@]}"
+printf '[migrate] %s\n' "${selected_files[@]#"$repository_root/"}"
 
-# Function: release advisory lock
-release_lock() {
-  local lock_id=1
-  echo "[migrate.sh] Releasing advisory lock..."
-  psql "$DB_URL" -c "SELECT pg_advisory_unlock($lock_id);" || true
-}
-
-# Cleanup on exit
-trap release_lock EXIT
-
-# Acquire lock if specified
-if [ "$LOCK_TIMEOUT" -gt 0 ]; then
-  acquire_lock "$LOCK_TIMEOUT"
+if [[ "$dry_run" == "true" ]]; then
+  exit 0
 fi
 
-# Pre-flight checks
-echo "[migrate.sh] Running pre-flight checks..."
-psql "$DB_URL" << 'EOF'
-BEGIN;
-SELECT 1 FROM organizations LIMIT 1;
-SELECT 1 FROM config_versions LIMIT 1;
-COMMIT;
-EOF
+if [[ -z "$database_url" ]]; then
+  echo "[ERROR] database URL is not set for $target_environment" >&2
+  exit 1
+fi
 
-# Deploy migrations
-echo "[migrate.sh] Deploying migrations..."
-for migration_file in migrations/sql/000*.sql; do
-  filename=$(basename "$migration_file")
-  version=$(echo "$filename" | cut -d- -f1)
-  
-  if [ -n "$TO_VERSION" ] && [ "$version" -gt "$TO_VERSION" ]; then
-    echo "[migrate.sh] Skipping $filename (version $version > target $TO_VERSION)"
-    continue
-  fi
-  
-  echo "[migrate.sh] Applying $filename..."
-  if [ "$DRY_RUN" = "true" ]; then
-    echo "[DRY_RUN] Would apply: $filename"
-  else
-    psql "$DB_URL" -f "$migration_file" || {
-      echo "[ERROR] Migration failed: $filename"
-      exit 1
-    }
-  fi
-done
+if ! command -v psql >/dev/null 2>&1; then
+  echo "[ERROR] psql is required" >&2
+  exit 1
+fi
 
-echo "[migrate.sh] Migration complete."
+sql_file=$(mktemp)
+cleanup() {
+  rm -f -- "$sql_file"
+}
+trap cleanup EXIT
+
+{
+  printf "SET lock_timeout TO '%ss';\n" "$lock_timeout"
+  printf 'SELECT pg_advisory_xact_lock(638491201);\n'
+  for schema_file in "${selected_files[@]}"; do
+    escaped_file=${schema_file//\'/\'\'}
+    printf "\\ir '%s'\n" "$escaped_file"
+  done
+} >"$sql_file"
+
+psql -X \
+  --set ON_ERROR_STOP=1 \
+  --single-transaction \
+  --dbname "$database_url" \
+  --file "$sql_file"
+
+echo "[migrate] schema bootstrap complete"

@@ -25,14 +25,16 @@ CREATE TABLE calculation_runs (
   completed_at TIMESTAMP,
   published_at TIMESTAMP,
   created_at TIMESTAMP NOT NULL DEFAULT now(),
-  updated_at TIMESTAMP NOT NULL DEFAULT now(),
-  UNIQUE(organization_id, period_start, period_end, rule_set_id, status) WHERE status IN ('queued', 'running')
+  updated_at TIMESTAMP NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_calculation_runs_org ON calculation_runs(organization_id);
 CREATE INDEX idx_calculation_runs_status ON calculation_runs(status);
 CREATE INDEX idx_calculation_runs_period ON calculation_runs(period_start, period_end);
 CREATE INDEX idx_calculation_runs_rule_set ON calculation_runs(rule_set_id);
+CREATE UNIQUE INDEX uq_calculation_runs_active
+  ON calculation_runs(organization_id, period_start, period_end, rule_set_id)
+  WHERE status IN ('queued', 'running');
 
 -- Calculation run revisions (history for corrections)
 CREATE TABLE calculation_run_revisions (
