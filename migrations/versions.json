@@ -1,1 +1,19 @@
-{"deployed_schemas":[{"slice":1,"name":"foundation","version":"0001","deployed_at":"2026-07-27T03:01:35Z","fingerprint":"abc123"},{"slice":2,"name":"revenue","version":"0002","deployed_at":"2026-07-27T03:01:35Z","fingerprint":"def456"},{"slice":3,"name":"cost_mapping","version":"0003","deployed_at":"2026-07-27T03:01:35Z","fingerprint":"ghi789"}],"latest_version":"0003","last_updated":"2026-07-27T03:01:35Z"}
+{
+  "schema_set": "v1-baseline",
+  "latest_slice": 13,
+  "files": [
+    "schema/01_foundation.sql",
+    "schema/02_revenue.sql",
+    "schema/03_cost_mapping.sql",
+    "schema/04_cost_classification.sql",
+    "schema/05_allocation_drivers.sql",
+    "schema/06_allocation_rules.sql",
+    "schema/07_calculation_runs.sql",
+    "schema/08_allocation_results.sql",
+    "schema/09_margin_aggregates.sql",
+    "schema/10_reconciliation.sql",
+    "schema/11_snapshots.sql",
+    "schema/12_audit_queries.sql",
+    "schema/13_raw_evidence_immutability.sql"
+  ]
+}

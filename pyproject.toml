@@ -1,0 +1,16 @@
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+markers = [
+  "integration: requires a PostgreSQL database from TEST_DATABASE_URL",
+]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "SIM", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
